@@ -1,0 +1,366 @@
+## React Web App Prompt: Nihongo Samurai - JLPT Study App
+
+Build a mobile-first React web application for JLPT vocabulary study with Spaced Repetition System (SRS). The app should work seamlessly on mobile browsers (iOS Safari, Android Chrome) and support offline functionality.
+
+### Tech Stack
+- **React 18+** with functional components and hooks
+- **Material-UI (MUI) v5** for all UI components
+- **IndexedDB** via Dexie.js for offline storage
+- **React Router v6** for navigation
+- **PapaParse** for CSV parsing from Google Sheets
+- **Workbox** (via CRA or Vite PWA plugin) for service worker and offline support
+
+### Core Features
+
+#### 1. Navigation Structure
+- **Bottom Navigation Bar** (MUI BottomNavigation) with 3 tabs:
+  - Vocabulary (BookIcon)
+  - Reading (MenuBookIcon) 
+  - Settings (SettingsIcon)
+- Fixed at bottom on mobile, always visible
+- Active tab highlighted with primary color
+- Smooth transitions between tabs
+
+#### 2. Vocabulary Section
+
+**Level Selection Screen:**
+- Display JLPT level cards in 2-column grid (MUI Grid)
+- Cards: N5, N4, N3, N2, N1
+- Each card should have:
+  - Gradient background (different color per level)
+  - Level number icon (use MUI Chip or Typography)
+  - Level name
+  - Elevation and hover effects
+  - Ripple animation on click
+- Colors: N5=green, N4=blue, N3=orange, N2=red, N1=purple
+- Empty state: "No vocabulary data. Please sync from Settings"
+
+**Category Selection Screen:**
+- Show categories for selected level (KANJI, Lesson01, Lesson02, etc.)
+- Each category card displays:
+  - Category name
+  - Word count
+  - Checkbox for multi-select
+  - Icon (language icon for KANJI, book icon for lessons)
+- Multi-select support with state management
+- Sticky "Start Review" button at bottom when categories selected
+- Button shows count: "Start Review (3 categories)"
+
+**SRS Review Screen:**
+- Card flip animation using CSS transforms or Framer Motion
+- Show LinearProgress at top with current position (e.g., "5/20")
+- Large centered card with Japanese word
+- Tap to flip and reveal English meaning
+- After flip, show 4 rating buttons in a row:
+  - Again (red) - quality 1
+  - Hard (orange) - quality 3  
+  - Good (green) - quality 4
+  - Easy (blue) - quality 5
+- Buttons should be large, thumb-friendly (min 48px height)
+- SafeArea padding for mobile browsers
+- Completion dialog with confetti or celebration animation
+
+#### 3. Google Sheets Integration
+
+**Data Structure:**
+- Google Sheets with sub-sheets: N5, N4, N3, N2, N1
+- Each sheet columns: Lesson | Japanese | English
+- Lesson values: "KANJI" or empty for kanji words, "Lesson01", "Lesson02", etc.
+
+**Sync Implementation:**
+```javascript
+// Convert Google Sheets URL to CSV export
+const sheetUrl = "https://docs.google.com/spreadsheets/d/{ID}/export?format=csv&gid={GID}"
+
+// Fetch and parse CSV
+fetch(sheetUrl)
+  .then(res => res.text())
+  .then(csv => Papa.parse(csv, { header: true }))
+  .then(data => storeInIndexedDB(data))
+```
+
+**Sync Logic:**
+- Fetch each level's sheet by GID (N5=0, N4=1, etc.)
+- Parse CSV rows
+- Check for duplicates before inserting (unique: level + lesson + japanese)
+- Show progress during sync
+- Display results: "Added 45 new words to N5"
+- Store last sync timestamp in localStorage
+
+#### 4. IndexedDB Schema (using Dexie.js)
+
+```javascript
+const db = new Dexie('NihongoSamuriDB');
+
+db.version(1).stores({
+  vocabularyWords: '++id, level, lesson, japanese, english, createdAt, [level+lesson+japanese]',
+  srsProgress: '++id, level, categories, wordId, repetitions, easeFactor, interval, nextReview, lastReviewed, [level+categories+wordId]'
+});
+```
+
+**VocabularyWord:**
+- id (auto-increment)
+- level (string: N5, N4, etc.)
+- lesson (string or null)
+- japanese (string)
+- english (string)
+- createdAt (ISO timestamp)
+
+**SRSProgress:**
+- id (auto-increment)
+- level (string)
+- categories (comma-separated string)
+- wordId (foreign key)
+- repetitions (number)
+- easeFactor (number, stored as 2500 = 2.5)
+- interval (number, days)
+- nextReview (ISO timestamp or null)
+- lastReviewed (ISO timestamp)
+
+#### 5. SRS Algorithm (SM-2)
+
+```javascript
+function calculateNextReview(progress, quality) {
+  let { repetitions, easeFactor, interval } = progress;
+  
+  if (quality < 3) {
+    // Failed - reset
+    repetitions = 0;
+    interval = 0;
+  } else {
+    // Success
+    if (repetitions === 0) interval = 1;
+    else if (repetitions === 1) interval = 6;
+    else interval = Math.round(interval * (easeFactor / 1000));
+    
+    repetitions++;
+    easeFactor = Math.max(1300, easeFactor + (100 * (5 - quality - 4)));
+  }
+  
+  const nextReview = quality < 3 
+    ? new Date(Date.now() + 10 * 60 * 1000) // 10 minutes
+    : new Date(Date.now() + interval * 24 * 60 * 60 * 1000);
+    
+  return { repetitions, easeFactor, interval, nextReview };
+}
+```
+
+**Review Session Logic:**
+- Fetch all words for selected categories
+- Get progress for each word
+- Separate into: new cards, due cards
+- Mix: 20% new cards, 80% due cards
+- Shuffle for variety
+- Track progress per word per category combination
+
+#### 6. Settings Screen
+
+**Google Sheets Configuration:**
+- TextField for spreadsheet URL
+- Button: "Save URL" (stores in localStorage)
+- Button: "Sync Data" with loading spinner
+- Display last sync time: "Last synced: 2 hours ago"
+- Default GID configuration (editable):
+  ```
+  N5: 0
+  N4: 1
+  N3: 2
+  N2: 3
+  N1: 4
+  ```
+
+**Data Management:**
+- Button: "Clear All Data" (danger zone, red)
+- Confirmation dialog before clearing
+
+**Instructions Card:**
+- Expandable accordion with setup instructions
+- How to format Google Sheets
+- How to make sheet public
+- Column requirements
+
+#### 7. UI/UX Requirements
+
+**Material-UI Theme:**
+```javascript
+const theme = createTheme({
+  palette: {
+    primary: {
+      main: '#3f51b5', // Indigo
+    },
+    secondary: {
+      main: '#f50057',
+    },
+  },
+  components: {
+    MuiCard: {
+      styleOverrides: {
+        root: {
+          borderRadius: 12,
+        },
+      },
+    },
+    MuiButton: {
+      styleOverrides: {
+        root: {
+          borderRadius: 12,
+          textTransform: 'none',
+          fontWeight: 600,
+        },
+      },
+    },
+  },
+});
+```
+
+**Mobile Optimizations:**
+- Use MUI Container with maxWidth="sm" for mobile
+- Touch-friendly buttons (min 48px height)
+- Proper viewport meta tag
+- Prevent zoom on input focus
+- Safe area insets for iOS (env(safe-area-inset-bottom))
+- Pull-to-refresh support on list screens
+- Skeleton loaders during data fetch
+
+**Animations:**
+- Card flip: CSS transform rotateY with transition
+- Button ripples: MUI default
+- Page transitions: Fade or slide (Framer Motion or MUI Slide)
+- Progress animations: Linear and circular
+
+**Responsive Design:**
+- Mobile-first approach
+- 2 columns on tablet/desktop for level cards
+- Stack buttons vertically on very narrow screens
+- Larger touch targets on mobile
+
+#### 8. PWA Configuration
+
+**manifest.json:**
+```json
+{
+  "name": "Nihongo Samurai",
+  "short_name": "JLPT Study",
+  "theme_color": "#3f51b5",
+  "background_color": "#ffffff",
+  "display": "standalone",
+  "orientation": "portrait",
+  "scope": "/",
+  "start_url": "/",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
+```
+
+**Service Worker:**
+- Cache static assets
+- Network-first for Google Sheets API
+- Cache-first for app shell
+- Offline fallback page
+
+#### 9. State Management
+
+Use React Context + useReducer or Zustand for:
+- Current vocabulary level
+- Selected categories
+- Review session state
+- Sync status
+- Settings (sheet URL, GIDs)
+
+#### 10. Project Structure
+
+```
+src/
+├── App.jsx
+├── index.jsx
+├── theme.js
+├── components/
+│   ├── BottomNav.jsx
+│   ├── LevelCard.jsx
+│   ├── CategoryCard.jsx
+│   ├── FlashCard.jsx
+│   ├── RatingButtons.jsx
+│   └── SyncDialog.jsx
+├── screens/
+│   ├── VocabularyScreen.jsx
+│   ├── CategorySelectionScreen.jsx
+│   ├── SRSReviewScreen.jsx
+│   ├── ReadingScreen.jsx (placeholder)
+│   └── SettingsScreen.jsx
+├── services/
+│   ├── db.js (Dexie setup)
+│   ├── googleSheets.js
+│   ├── srsService.js
+│   └── configService.js
+├── hooks/
+│   ├── useVocabulary.js
+│   ├── useSRSProgress.js
+│   └── useSync.js
+└── utils/
+    ├── srsAlgorithm.js
+    └── dateUtils.js
+```
+
+#### 11. Key Dependencies
+
+```json
+{
+  "dependencies": {
+    "react": "^18.2.0",
+    "@mui/material": "^5.14.0",
+    "@mui/icons-material": "^5.14.0",
+    "@emotion/react": "^11.11.0",
+    "@emotion/styled": "^11.11.0",
+    "react-router-dom": "^6.15.0",
+    "dexie": "^3.2.4",
+    "dexie-react-hooks": "^1.1.7",
+    "papaparse": "^5.4.1",
+    "framer-motion": "^10.16.0"
+  }
+}
+```
+
+#### 12. Special Requirements
+
+- **iOS Safari Support:** Handle 100vh issues, use -webkit-fill-available
+- **Android Chrome:** Support pull-to-refresh
+- **Offline-First:** All data accessible without internet after initial sync
+- **No Login:** Everything stored locally in IndexedDB
+- **Privacy:** No data sent to servers except Google Sheets fetch
+- **Performance:** Lazy load screens, virtualize long lists
+- **Accessibility:** ARIA labels, keyboard navigation, semantic HTML
+
+#### 13. Empty States & Error Handling
+
+- Empty state for no vocabulary: "Sync data from Settings"
+- Empty state for no due cards: "No cards to review. Great job!"
+- Network error during sync: "Failed to fetch. Check your connection."
+- Invalid Google Sheets URL: "Invalid URL format"
+- Loading states: Skeleton loaders or circular progress
+
+#### 14. Testing Checklist
+
+- [ ] Works offline after initial sync
+- [ ] Card flip animation smooth on mobile
+- [ ] Multi-select categories works
+- [ ] SRS algorithm calculates correct intervals
+- [ ] Bottom nav stays fixed on scroll
+- [ ] Touch targets are 48px+ on mobile
+- [ ] No layout shift during load
+- [ ] Safe area respected on iPhone
+- [ ] Data persists after browser close
+- [ ] Sync only adds new words (no duplicates)
+
+---
+
+**This prompt provides everything needed to build the same JLPT study app as a mobile-friendly React web app with Material-UI and offline support using IndexedDB.**
