@@ -19,9 +19,13 @@ import {
   Switch,
   FormControlLabel,
   AppBar,
-  Toolbar
+  Toolbar,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel
 } from '@mui/material';
-import { ExpandMore, Delete, Sync, Info, CheckCircle } from '@mui/icons-material';
+import { ExpandMore, Delete, Sync, Info, CheckCircle, VolumeUp, Stop, CloudDownload, Storage } from '@mui/icons-material';
 import { useState, useEffect } from 'react';
 import { 
   getSheetsUrl, 
@@ -33,9 +37,13 @@ import {
   getRandomOrderEnabled,
   setRandomOrderEnabled,
   getUnlimitedReviews,
-  setUnlimitedReviews
+  setUnlimitedReviews,
+  getSelectedVoice,
+  setSelectedVoice
 } from '../services/configService';
 import { validateSheetsUrl, syncAllSheets, testSheetAccess, getAllSheets } from '../services/googleSheets';
+import { getJapaneseVoices, speakJapanese, stopSpeaking } from '../services/speechService';
+import { getCacheStatistics, prefetchAllLevels, clearAllCache } from '../services/readingCacheService';
 import db from '../services/db';
 import SyncDialog from '../components/SyncDialog';
 import { formatRelativeTime } from '../utils/dateUtils';
@@ -51,6 +59,11 @@ const SettingsScreen = () => {
   const [animationsEnabled, setAnimationsEnabledState] = useState(true);
   const [randomOrderEnabled, setRandomOrderEnabledState] = useState(false);
   const [unlimitedReviews, setUnlimitedReviewsState] = useState(false);
+  const [selectedVoice, setSelectedVoiceState] = useState('');
+  const [japaneseVoices, setJapaneseVoices] = useState([]);
+  const [isPreviewingVoice, setIsPreviewingVoice] = useState(false);
+  const [cacheStats, setCacheStats] = useState(null);
+  const [isPrefetching, setIsPrefetching] = useState(false);
   const [syncState, setSyncState] = useState({
     isLoading: false,
     currentLevel: null,
@@ -60,6 +73,18 @@ const SettingsScreen = () => {
   
   useEffect(() => {
     loadSettings();
+    loadCacheStats();
+    
+    // Load Japanese voices
+    if ('speechSynthesis' in window) {
+      const loadVoices = () => {
+        const voices = getJapaneseVoices();
+        setJapaneseVoices(voices);
+      };
+      
+      loadVoices();
+      window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
   }, []);
   
   const loadSettings = () => {
@@ -68,6 +93,43 @@ const SettingsScreen = () => {
     setAnimationsEnabledState(getAnimationsEnabled());
     setRandomOrderEnabledState(getRandomOrderEnabled());
     setUnlimitedReviewsState(getUnlimitedReviews());
+    setSelectedVoiceState(getSelectedVoice());
+  };
+  
+  const loadCacheStats = async () => {
+    try {
+      const stats = await getCacheStatistics();
+      setCacheStats(stats);
+    } catch (error) {
+      console.error('Error loading cache stats:', error);
+    }
+  };
+  
+  const handlePrefetchContent = async () => {
+    setIsPrefetching(true);
+    try {
+      await prefetchAllLevels();
+      await loadCacheStats();
+      alert('Successfully prefetched content for offline use!');
+    } catch (error) {
+      console.error('Prefetch error:', error);
+      alert('Failed to prefetch content. Please try again.');
+    } finally {
+      setIsPrefetching(false);
+    }
+  };
+  
+  const handleClearReadingCache = async () => {
+    if (window.confirm('Clear all reading content cache? This will not affect your vocabulary or progress.')) {
+      try {
+        await clearAllCache();
+        await loadCacheStats();
+        alert('Reading cache cleared successfully!');
+      } catch (error) {
+        console.error('Clear cache error:', error);
+        alert('Failed to clear cache. Please try again.');
+      }
+    }
   };
   
   const handleToggleAnimations = (event) => {
@@ -86,6 +148,34 @@ const SettingsScreen = () => {
     const enabled = event.target.checked;
     setUnlimitedReviewsState(enabled);
     setUnlimitedReviews(enabled);
+  };
+  
+  const handleVoiceChange = (event) => {
+    const voice = event.target.value;
+    setSelectedVoiceState(voice);
+    setSelectedVoice(voice);
+  };
+  
+  const handlePreviewVoice = async () => {
+    if (isPreviewingVoice) {
+      stopSpeaking();
+      setIsPreviewingVoice(false);
+      return;
+    }
+    
+    if (!selectedVoice) {
+      alert('Please select a voice first');
+      return;
+    }
+    
+    try {
+      setIsPreviewingVoice(true);
+      await speakJapanese('こんにちは。これは音声のプレビューです。', selectedVoice);
+      setIsPreviewingVoice(false);
+    } catch (error) {
+      console.error('Voice preview error:', error);
+      setIsPreviewingVoice(false);
+    }
   };
   
   const handleSaveUrl = async () => {
@@ -375,6 +465,111 @@ const SettingsScreen = () => {
             </Box>
           }
         />
+        
+        <Box sx={{ mt: 3 }}>
+          <Typography variant="body2" color="text.secondary" gutterBottom>
+            Japanese Voice for Reading
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end' }}>
+            <FormControl fullWidth sx={{ mt: 1 }}>
+              <InputLabel>Select Voice</InputLabel>
+              <Select
+                value={selectedVoice}
+                label="Select Voice"
+                onChange={handleVoiceChange}
+              >
+                {japaneseVoices.length === 0 && (
+                  <MenuItem value="">
+                    <em>No Japanese voices available</em>
+                  </MenuItem>
+                )}
+                {japaneseVoices.map((voice) => (
+                  <MenuItem key={voice.name} value={voice.name}>
+                    {voice.name} ({voice.lang})
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <Button
+              variant="outlined"
+              onClick={handlePreviewVoice}
+              disabled={!selectedVoice || isPreviewingVoice}
+              startIcon={isPreviewingVoice ? <Stop /> : <VolumeUp />}
+              sx={{ minWidth: 120, height: 56 }}
+            >
+              {isPreviewingVoice ? 'Stop' : 'Preview'}
+            </Button>
+          </Box>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+            This voice will be used in the Reading Practice section. Click Preview to test the selected voice.
+          </Typography>
+        </Box>
+      </Paper>
+      
+      {/* Reading Content Cache */}
+      <Paper sx={{ p: 2, mb: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+          <Storage color="primary" />
+          <Typography variant="h6">
+            Offline Reading Content
+          </Typography>
+        </Box>
+        
+        <Alert severity="info" sx={{ mb: 2 }}>
+          <Typography variant="body2">
+            Download reading content for offline use. Perfect for studying on the metro or when internet is unavailable.
+          </Typography>
+        </Alert>
+        
+        {cacheStats && (
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="body2" color="text.secondary" gutterBottom>
+              <strong>Cache Status:</strong>
+            </Typography>
+            {Object.entries(cacheStats).map(([level, types]) => (
+              <Box key={level} sx={{ ml: 2, mb: 1 }}>
+                <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                  {level}:
+                </Typography>
+                <Typography variant="caption" sx={{ ml: 2, display: 'block' }}>
+                  Sentences: {types.sentence.unreadCount} unread / {types.sentence.total} total
+                </Typography>
+                <Typography variant="caption" sx={{ ml: 2, display: 'block' }}>
+                  Paragraphs: {types.paragraph.unreadCount} unread / {types.paragraph.total} total
+                </Typography>
+                <Typography variant="caption" sx={{ ml: 2, display: 'block' }}>
+                  Full Articles: {types.full.unreadCount} unread / {types.full.total} total
+                </Typography>
+              </Box>
+            ))}
+          </Box>
+        )}
+        
+        <Stack spacing={2}>
+          <Button
+            variant="contained"
+            fullWidth
+            startIcon={isPrefetching ? <CircularProgress size={20} /> : <CloudDownload />}
+            onClick={handlePrefetchContent}
+            disabled={isPrefetching}
+          >
+            {isPrefetching ? 'Downloading...' : 'Download All Content for Offline'}
+          </Button>
+          
+          <Button
+            variant="outlined"
+            fullWidth
+            startIcon={<Delete />}
+            onClick={handleClearReadingCache}
+          >
+            Clear Reading Cache
+          </Button>
+          
+          <Typography variant="caption" color="text.secondary">
+            <strong>Auto-rotation:</strong> Content automatically refreshes as you read. 
+            Keeps 50-100 sentences, 25-30 paragraphs, and 10-15 full articles cached per level.
+          </Typography>
+        </Stack>
       </Paper>
       
       {/* Data Management */}

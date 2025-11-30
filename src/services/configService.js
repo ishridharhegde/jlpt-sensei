@@ -3,7 +3,9 @@ const STORAGE_KEYS = {
   LAST_SYNC: 'nihongo_samurai_last_sync',
   ANIMATIONS_ENABLED: 'nihongo_samurai_animations_enabled',
   RANDOM_ORDER_ENABLED: 'nihongo_samurai_random_order_enabled',
-  UNLIMITED_REVIEWS: 'nihongo_samurai_unlimited_reviews'
+  UNLIMITED_REVIEWS: 'nihongo_samurai_unlimited_reviews',
+  SELECTED_VOICE: 'nihongo_samurai_selected_voice',
+  SHOW_ALL_FURIGANA: 'nihongo_samurai_show_all_furigana'
 };
 
 /**
@@ -78,6 +80,34 @@ export function getUnlimitedReviews() {
  */
 export function setUnlimitedReviews(enabled) {
   localStorage.setItem(STORAGE_KEYS.UNLIMITED_REVIEWS, enabled.toString());
+}
+
+/**
+ * Get selected Japanese voice
+ */
+export function getSelectedVoice() {
+  return localStorage.getItem(STORAGE_KEYS.SELECTED_VOICE) || '';
+}
+
+/**
+ * Set selected Japanese voice
+ */
+export function setSelectedVoice(voiceName) {
+  localStorage.setItem(STORAGE_KEYS.SELECTED_VOICE, voiceName);
+}
+
+/**
+ * Get show all furigana setting
+ */
+export function getShowAllFurigana() {
+  return localStorage.getItem(STORAGE_KEYS.SHOW_ALL_FURIGANA) === 'true';
+}
+
+/**
+ * Set show all furigana setting
+ */
+export function setShowAllFurigana(enabled) {
+  localStorage.setItem(STORAGE_KEYS.SHOW_ALL_FURIGANA, enabled.toString());
 }
 
 /**
